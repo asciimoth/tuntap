@@ -17,9 +17,9 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/sys/unix"
 	gtun "github.com/asciimoth/gonnect/tun"
 	"github.com/asciimoth/tuntap/rwcancel"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -36,9 +36,9 @@ const (
 // construction.
 type NativeTun struct {
 	tunFile                 *os.File
-	index                   int32      // if index
-	errors                  chan error                            // async error handling
-	events                  chan gtun.Event                       // device related events
+	index                   int32           // if index
+	errors                  chan error      // async error handling
+	events                  chan gtun.Event // device related events
 	netlinkSock             int
 	netlinkCancel           *rwcancel.RWCancel
 	hackListenerClosed      sync.Mutex

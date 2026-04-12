@@ -1,0 +1,12 @@
+[default.extend-words]
+_ND6_IFF_AUTO_LINKLOCAL= "_ND6_IFF_AUTO_LINKLOCAL"
+_ND6_IFF_NO_DAD = "_ND6_IFF_NO_DAD"
+ND6 = "ND6"
+nd6 = "nd6"
+nd6Req = "nd6Req"
+nd = "nd"
+ND = "ND"
+
+[files]
+extend-exclude = ["filter_test.go"]
+

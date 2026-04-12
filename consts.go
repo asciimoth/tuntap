@@ -7,4 +7,3 @@ const (
 	// On all other platforms, BatchSize() returns 1.
 	IdealBatchSize = 128
 )
-

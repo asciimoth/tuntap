@@ -8,5 +8,5 @@ import (
 // Static type assertions
 var (
 	// _ gonnect.UpDown           = &NativeTun{} // TODO: Implement UpDown
-	_ tun.Tun                  = &NativeTun{}
+	_ tun.Tun = &NativeTun{}
 )
