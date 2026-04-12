@@ -27,6 +27,12 @@ type ifreq_mtu struct {
 
 const _TUNSIFMODE = 0x8004745d
 
+// NativeTun is an OpenBSD-specific TUN device. It implements the tun.Tun
+// interface from github.com/asciimoth/gonnect/tun.
+//
+// On OpenBSD, interface names must follow the pattern "tun" or "tunN".
+// When "tun" is specified, the implementation iterates through /dev/tun0
+// through /dev/tun255 to find an available device.
 type NativeTun struct {
 	name        string
 	tunFile     *os.File
@@ -101,6 +107,10 @@ func (tun *NativeTun) routineRouteListener(tunIfindex int) {
 	}
 }
 
+// CreateTUN creates a TUN device on OpenBSD with the given interface name and MTU.
+//
+// The name must be "tun" (to auto-assign an index) or "tunN" (e.g., "tun0",
+// "tun1") to request a specific index.
 func CreateTUN(name string, mtu int) (Device, error) {
 	ifIndex := -1
 	if name != "tun" {
@@ -140,6 +150,9 @@ func CreateTUN(name string, mtu int) (Device, error) {
 	return tun, err
 }
 
+// CreateTUNFromFile creates a TUN device from an existing os.File with the
+// given MTU. It starts a background goroutine to monitor route socket events
+// for interface state changes.
 func CreateTUNFromFile(file *os.File, mtu int) (Device, error) {
 	tun := &NativeTun{
 		tunFile: file,
@@ -328,6 +341,7 @@ func (tun *NativeTun) MTU() (int, error) {
 	return int(*(*int32)(unsafe.Pointer(&ifr.MTU))), nil
 }
 
+// BatchSize returns 1, as OpenBSD does not support batched TUN I/O.
 func (tun *NativeTun) BatchSize() int {
 	return 1
 }

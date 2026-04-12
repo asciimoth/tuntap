@@ -27,6 +27,13 @@ const (
 	ifReqSize       = unix.IFNAMSIZ + 64
 )
 
+// NativeTun is a Linux-specific TUN device. It implements the tun.Tun
+// interface from github.com/asciimoth/gonnect/tun.
+//
+// On Linux, NativeTun supports batched I/O and TCP/UDP generic receive
+// offload (GRO) / generic segmentation offload (GSO) when the kernel
+// provides IFF_VNET_HDR. These features are detected automatically during
+// construction.
 type NativeTun struct {
 	tunFile                 *os.File
 	index                   int32      // if index
@@ -475,6 +482,9 @@ func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) 
 	}
 }
 
+// Events returns a channel that emits device state changes. The channel
+// emits EventUp, EventDown, and EventMTUUpdate values. The channel is
+// closed when the TUN device is closed.
 func (tun *NativeTun) Events() <-chan gtun.Event {
 	return tun.events
 }
@@ -498,6 +508,9 @@ func (tun *NativeTun) Close() error {
 	return err2
 }
 
+// BatchSize returns the maximum number of packets that can be processed
+// in a single Read or Write call. On Linux with IFF_VNET_HDR support,
+// this returns IdealBatchSize (128). Otherwise, it returns 1.
 func (tun *NativeTun) BatchSize() int {
 	return tun.batchSize
 }
@@ -547,7 +560,14 @@ func (tun *NativeTun) initFromFlags(name string) error {
 	return err
 }
 
-// CreateTUN creates a Tun with the provided name and MTU.
+// CreateTUN creates a TUN device with the given interface name and MTU.
+//
+// The name must be a valid Linux interface name. If IFF_VNET_HDR is
+// supported by the kernel, the device will automatically enable TCP/UDP
+// offload features (GRO/GSO).
+//
+// The returned NativeTun starts background goroutines that monitor the
+// device state and emit events on the Events channel.
 func CreateTUN(name string, mtu int) (gtun.Tun, error) {
 	nfd, err := unix.Open(cloneDevicePath, unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -581,7 +601,12 @@ func CreateTUN(name string, mtu int) (gtun.Tun, error) {
 	return CreateTUNFromFile(fd, mtu)
 }
 
-// CreateTUNFromFile creates a Tun from an os.File with the provided MTU.
+// CreateTUNFromFile creates a TUN device from an existing os.File with the
+// given MTU. The file must be a valid TUN file descriptor (e.g., opened
+// from /dev/net/tun). This is useful when the file descriptor has been
+// passed from a parent process or obtained through other means.
+//
+// Like CreateTUN, this starts background goroutines for device monitoring.
 func CreateTUNFromFile(file *os.File, mtu int) (gtun.Tun, error) {
 	tun := &NativeTun{
 		tunFile:                 file,
@@ -632,8 +657,14 @@ func CreateTUNFromFile(file *os.File, mtu int) (gtun.Tun, error) {
 	return tun, nil
 }
 
-// CreateUnmonitoredTUNFromFD creates a Tun from the provided file
-// descriptor.
+// CreateUnmonitoredTUNFromFD creates a TUN device from a raw file descriptor
+// without starting any background monitoring goroutines. Unlike CreateTUN
+// and CreateTUNFromFile, no netlink or hack-listener goroutines are spawned,
+// so the Events channel will not receive automatic state updates. This is
+// useful in scenarios where the caller manages the device lifecycle externally
+// or when embedding the TUN fd in an existing event loop.
+//
+// It returns the Tun device, the interface name, and any error that occurred.
 func CreateUnmonitoredTUNFromFD(fd int) (gtun.Tun, string, error) {
 	err := unix.SetNonblock(fd, true)
 	if err != nil {

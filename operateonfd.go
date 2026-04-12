@@ -11,6 +11,8 @@ import (
 	"fmt"
 )
 
+// operateOnFd safely executes a function that performs syscalls on the
+// underlying file descriptor of the TUN device, using SyscallConn.Control.
 func (tun *NativeTun) operateOnFd(fn func(fd uintptr)) {
 	sysconn, err := tun.tunFile.SyscallConn()
 	if err != nil {

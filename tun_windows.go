@@ -31,6 +31,12 @@ type rateJuggler struct {
 	changing      atomic.Bool
 }
 
+// NativeTun is a Windows-specific TUN device using the Wintun driver.
+// It implements the tun.Tun interface from github.com/asciimoth/gonnect/tun.
+//
+// On Windows, this package uses the Wintun driver (golang.zx2c4.com/wintun).
+// The global variables WintunTunnelType and WintunStaticRequestedGUID can be
+// set before calling CreateTUN to customize the adapter type and GUID.
 type NativeTun struct {
 	wt        *wintun.Adapter
 	name      string
@@ -47,7 +53,14 @@ type NativeTun struct {
 }
 
 var (
-	WintunTunnelType          = "WireGuard"
+	// WintunTunnelType specifies the adapter type reported by Windows for
+	// created TUN devices. The default is "WireGuard". Set this before
+	// calling CreateTUN to customize the type.
+	WintunTunnelType = "WireGuard"
+
+	// WintunStaticRequestedGUID specifies a static GUID to request when
+	// creating a TUN device. Set this before calling CreateTUN to use a
+	// fixed GUID. If nil (the default), a GUID is assigned automatically.
 	WintunStaticRequestedGUID *windows.GUID
 )
 
@@ -57,14 +70,15 @@ func procyield(cycles uint32)
 //go:linkname nanotime runtime.nanotime
 func nanotime() int64
 
-// CreateTUN creates a Wintun interface with the given name. Should a Wintun
-// interface with the same name exist, it is reused.
+// CreateTUN creates a Wintun-based TUN device with the given interface name
+// and MTU. If an interface with the same name already exists, it is reused.
 func CreateTUN(ifname string, mtu int) (Device, error) {
 	return CreateTUNWithRequestedGUID(ifname, WintunStaticRequestedGUID, mtu)
 }
 
-// CreateTUNWithRequestedGUID creates a Wintun interface with the given name and
-// a requested GUID. Should a Wintun interface with the same name exist, it is reused.
+// CreateTUNWithRequestedGUID creates a Wintun-based TUN device with the given
+// interface name and a requested GUID. If an interface with the same name
+// already exists, it is reused.
 func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID, mtu int) (Device, error) {
 	wt, err := wintun.CreateAdapter(ifname, WintunTunnelType, requestedGUID)
 	if err != nil {
@@ -121,11 +135,14 @@ func (tun *NativeTun) Close() error {
 	return err
 }
 
+// MTU returns the configured MTU of the TUN device.
 func (tun *NativeTun) MTU() (int, error) {
 	return tun.forcedMTU, nil
 }
 
-// TODO: This is a temporary hack. We really need to be monitoring the interface in real time and adapting to MTU changes.
+// ForceMTU updates the MTU of the TUN device and emits an EventMTUUpdate
+// on the Events channel if the value changed. This is a Windows-specific
+// method to work around the lack of automatic MTU monitoring.
 func (tun *NativeTun) ForceMTU(mtu int) {
 	if tun.close.Load() {
 		return
@@ -137,6 +154,7 @@ func (tun *NativeTun) ForceMTU(mtu int) {
 	}
 }
 
+// BatchSize returns 1, as Wintun does not support batched I/O.
 func (tun *NativeTun) BatchSize() int {
 	// TODO: implement batching with wintun
 	return 1
@@ -210,7 +228,9 @@ func (tun *NativeTun) Write(bufs [][]byte, offset int) (int, error) {
 	return len(bufs), nil
 }
 
-// LUID returns Windows interface instance ID.
+// LUID returns the Windows network interface instance ID (Locally Unique
+// Identifier) for this TUN device. This can be used with other Windows APIs
+// that require a LUID, such as network configuration functions.
 func (tun *NativeTun) LUID() uint64 {
 	tun.running.Add(1)
 	defer tun.running.Done()

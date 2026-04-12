@@ -67,6 +67,12 @@ type nd6Req struct {
 	Randomid      [8]byte
 }
 
+// NativeTun is a FreeBSD-specific TUN device. It implements the tun.Tun
+// interface from github.com/asciimoth/gonnect/tun.
+//
+// On FreeBSD, TUN devices are created via /dev/tun and can be renamed to
+// the requested interface name. The implementation automatically disables
+// IPv6 link-local addresses.
 type NativeTun struct {
 	name        string
 	tunFile     *os.File
@@ -159,6 +165,11 @@ func tunDestroy(name string) error {
 	return nil
 }
 
+// CreateTUN creates a TUN device on FreeBSD with the given interface name and MTU.
+//
+// If an interface with the given name already exists, an error is returned.
+// The implementation creates a new /dev/tun device and renames it to the
+// requested name.
 func CreateTUN(name string, mtu int) (Device, error) {
 	if len(name) > unix.IFNAMSIZ-1 {
 		return nil, errors.New("interface name too long")
@@ -261,6 +272,9 @@ func CreateTUN(name string, mtu int) (Device, error) {
 	return CreateTUNFromFile(tunFile, mtu)
 }
 
+// CreateTUNFromFile creates a TUN device from an existing os.File with the
+// given MTU. It starts a background goroutine to monitor route socket events
+// for interface state changes.
 func CreateTUNFromFile(file *os.File, mtu int) (Device, error) {
 	tun := &NativeTun{
 		tunFile: file,
@@ -430,6 +444,7 @@ func (tun *NativeTun) MTU() (int, error) {
 	return int(*(*int32)(unsafe.Pointer(&ifr.MTU))), nil
 }
 
+// BatchSize returns 1, as FreeBSD does not support batched TUN I/O.
 func (tun *NativeTun) BatchSize() int {
 	return 1
 }
