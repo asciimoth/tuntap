@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	gtun "github.com/asciimoth/gonnect/tun"
 	"golang.org/x/sys/unix"
 )
 
@@ -76,7 +77,7 @@ type nd6Req struct {
 type NativeTun struct {
 	name        string
 	tunFile     *os.File
-	events      chan Event
+	events      chan gtun.Event
 	errors      chan error
 	routeSocket int
 	closeOnce   sync.Once
@@ -123,16 +124,16 @@ func (tun *NativeTun) routineRouteListener(tunIfindex int) {
 		// Up / Down event
 		up := (iface.Flags & net.FlagUp) != 0
 		if up != statusUp && up {
-			tun.events <- EventUp
+			tun.events <- gtun.EventUp
 		}
 		if up != statusUp && !up {
-			tun.events <- EventDown
+			tun.events <- gtun.EventDown
 		}
 		statusUp = up
 
 		// MTU changes
 		if iface.MTU != statusMTU {
-			tun.events <- EventMTUUpdate
+			tun.events <- gtun.EventMTUUpdate
 		}
 		statusMTU = iface.MTU
 	}
@@ -170,7 +171,7 @@ func tunDestroy(name string) error {
 // If an interface with the given name already exists, an error is returned.
 // The implementation creates a new /dev/tun device and renames it to the
 // requested name.
-func CreateTUN(name string, mtu int) (Device, error) {
+func CreateTUN(name string, mtu int) (gtun.Tun, error) {
 	if len(name) > unix.IFNAMSIZ-1 {
 		return nil, errors.New("interface name too long")
 	}
@@ -275,10 +276,10 @@ func CreateTUN(name string, mtu int) (Device, error) {
 // CreateTUNFromFile creates a TUN device from an existing os.File with the
 // given MTU. It starts a background goroutine to monitor route socket events
 // for interface state changes.
-func CreateTUNFromFile(file *os.File, mtu int) (Device, error) {
+func CreateTUNFromFile(file *os.File, mtu int) (gtun.Tun, error) {
 	tun := &NativeTun{
 		tunFile: file,
-		events:  make(chan Event, 10),
+		events:  make(chan gtun.Event, 10),
 		errors:  make(chan error, 1),
 	}
 
@@ -343,7 +344,7 @@ func (tun *NativeTun) File() *os.File {
 	return tun.tunFile
 }
 
-func (tun *NativeTun) Events() <-chan Event {
+func (tun *NativeTun) Events() <-chan gtun.Event {
 	return tun.events
 }
 

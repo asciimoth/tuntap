@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	gtun "github.com/asciimoth/gonnect/tun"
 	"golang.org/x/sys/unix"
 )
 
@@ -36,7 +37,7 @@ const _TUNSIFMODE = 0x8004745d
 type NativeTun struct {
 	name        string
 	tunFile     *os.File
-	events      chan Event
+	events      chan gtun.Event
 	errors      chan error
 	routeSocket int
 	closeOnce   sync.Once
@@ -60,16 +61,16 @@ func (tun *NativeTun) routineRouteListener(tunIfindex int) {
 		// Up / Down event
 		up := (iface.Flags & net.FlagUp) != 0
 		if up != statusUp && up {
-			tun.events <- EventUp
+			tun.events <- gtun.EventUp
 		}
 		if up != statusUp && !up {
-			tun.events <- EventDown
+			tun.events <- gtun.EventDown
 		}
 		statusUp = up
 
 		// MTU changes
 		if iface.MTU != statusMTU {
-			tun.events <- EventMTUUpdate
+			tun.events <- gtun.EventMTUUpdate
 		}
 		statusMTU = iface.MTU
 		return false
@@ -111,7 +112,7 @@ func (tun *NativeTun) routineRouteListener(tunIfindex int) {
 //
 // The name must be "tun" (to auto-assign an index) or "tunN" (e.g., "tun0",
 // "tun1") to request a specific index.
-func CreateTUN(name string, mtu int) (Device, error) {
+func CreateTUN(name string, mtu int) (gtun.Tun, error) {
 	ifIndex := -1
 	if name != "tun" {
 		_, err := fmt.Sscanf(name, "tun%d", &ifIndex)
@@ -153,10 +154,10 @@ func CreateTUN(name string, mtu int) (Device, error) {
 // CreateTUNFromFile creates a TUN device from an existing os.File with the
 // given MTU. It starts a background goroutine to monitor route socket events
 // for interface state changes.
-func CreateTUNFromFile(file *os.File, mtu int) (Device, error) {
+func CreateTUNFromFile(file *os.File, mtu int) (gtun.Tun, error) {
 	tun := &NativeTun{
 		tunFile: file,
-		events:  make(chan Event, 10),
+		events:  make(chan gtun.Event, 10),
 		errors:  make(chan error, 1),
 	}
 
@@ -213,7 +214,7 @@ func (tun *NativeTun) File() *os.File {
 	return tun.tunFile
 }
 
-func (tun *NativeTun) Events() <-chan Event {
+func (tun *NativeTun) Events() <-chan gtun.Event {
 	return tun.events
 }
 
