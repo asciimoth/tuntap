@@ -1,5 +1,5 @@
 # TunTap
-
+[![Go Reference](https://pkg.go.dev/badge/github.com/asciimoth/tuntap.svg)](https://pkg.go.dev/github.com/asciimoth/tuntap)  
 Cross-platform TUN (network tunnel) device support for Go. 
 
 > [!IMPORTANT]
