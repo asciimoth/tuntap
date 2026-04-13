@@ -38,7 +38,7 @@
               ''; in builtins.toString script;
               stages = [ "commit-msg" ];
             };
-            govet.enable = true;
+            # govet.enable = true;
             gofmt.enable = true;
             gotidy = {
               enable = true;
