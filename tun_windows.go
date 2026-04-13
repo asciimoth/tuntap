@@ -14,6 +14,7 @@ import (
 	"time"
 	_ "unsafe"
 
+	gtun "github.com/asciimoth/gonnect/tun"
 	"golang.org/x/sys/windows"
 	"golang.zx2c4.com/wintun"
 )
@@ -44,7 +45,7 @@ type NativeTun struct {
 	rate      rateJuggler
 	session   wintun.Session
 	readWait  windows.Handle
-	events    chan Event
+	events    chan gtun.Event
 	running   sync.WaitGroup
 	closeOnce sync.Once
 	close     atomic.Bool
@@ -72,14 +73,14 @@ func nanotime() int64
 
 // CreateTUN creates a Wintun-based TUN device with the given interface name
 // and MTU. If an interface with the same name already exists, it is reused.
-func CreateTUN(ifname string, mtu int) (Device, error) {
+func CreateTUN(ifname string, mtu int) (gtun.Tun, error) {
 	return CreateTUNWithRequestedGUID(ifname, WintunStaticRequestedGUID, mtu)
 }
 
 // CreateTUNWithRequestedGUID creates a Wintun-based TUN device with the given
 // interface name and a requested GUID. If an interface with the same name
 // already exists, it is reused.
-func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID, mtu int) (Device, error) {
+func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID, mtu int) (gtun.Tun, error) {
 	wt, err := wintun.CreateAdapter(ifname, WintunTunnelType, requestedGUID)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating interface: %w", err)
@@ -94,7 +95,7 @@ func CreateTUNWithRequestedGUID(ifname string, requestedGUID *windows.GUID, mtu 
 		wt:        wt,
 		name:      ifname,
 		handle:    windows.InvalidHandle,
-		events:    make(chan Event, 10),
+		events:    make(chan gtun.Event, 10),
 		forcedMTU: forcedMTU,
 	}
 
@@ -116,7 +117,7 @@ func (tun *NativeTun) File() *os.File {
 	return nil
 }
 
-func (tun *NativeTun) Events() <-chan Event {
+func (tun *NativeTun) Events() <-chan gtun.Event {
 	return tun.events
 }
 
@@ -150,7 +151,7 @@ func (tun *NativeTun) ForceMTU(mtu int) {
 	update := tun.forcedMTU != mtu
 	tun.forcedMTU = mtu
 	if update {
-		tun.events <- EventMTUUpdate
+		tun.events <- gtun.EventMTUUpdate
 	}
 }
 
