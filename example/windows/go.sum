@@ -1,9 +1,9 @@
 github.com/asciimoth/bufpool v0.3.0 h1:tQMop/kZ3eOLSorM9i0cqtOIpxWQUroGZ6oNk5DTnQc=
 github.com/asciimoth/bufpool v0.3.0/go.mod h1:JV6H4hpj2bCS5Svr0wNqR+XOZFOOkdXfNZxCjm/3QHw=
-github.com/asciimoth/gonnect v0.3.2 h1:HZ4zGpWuZm+ZiqpsfPlpW7HO+rOfBNJQRCRZteNQn7s=
-github.com/asciimoth/gonnect v0.3.2/go.mod h1:XwXDVDjucVhOa/cifySEx+ij8veNKhtzUTnCdF1p+ug=
-github.com/asciimoth/gonnect-netstack v0.3.2 h1:FSWKYmVS8QRlbkim4Aanujo2eBFZZTnoEOLMUbM6Olc=
-github.com/asciimoth/gonnect-netstack v0.3.2/go.mod h1:WPWBfUCWIoko5FLOvhRc6VjuKi/Ug5IFr1Z7rcVtfOs=
+github.com/asciimoth/gonnect v0.4.0 h1:xY8W0i1SXL9bf4BT6SS4SOw9otgv4KbvVqvvz7+FKng=
+github.com/asciimoth/gonnect v0.4.0/go.mod h1:XwXDVDjucVhOa/cifySEx+ij8veNKhtzUTnCdF1p+ug=
+github.com/asciimoth/gonnect-netstack v0.3.3 h1:H+tgcZqbosZkthZKWc/VcDlVH+U1Oa10ksDW/Fy9tC8=
+github.com/asciimoth/gonnect-netstack v0.3.3/go.mod h1:39v6HbC7MI75ZKgmITENMwu4Qc1eieUNyU8td7fnm0E=
 github.com/google/btree v1.1.2 h1:xf4v41cLI2Z6FxbKm+8Bu+m8ifhj15JuZ9sa0jZCMUU=
 github.com/google/btree v1.1.2/go.mod h1:qOPhT0dTNdNzV6Z/lhRX0YXUafgPLFUh+gZMl761Gm4=
 golang.org/x/exp v0.0.0-20231110203233-9a3e6036ecaa h1:FRnLl4eNAQl8hwxVVC17teOw8kdjVDVAiFMtgUdTSRQ=

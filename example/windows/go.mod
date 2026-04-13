@@ -3,9 +3,9 @@ module github.com/asciimoth/tuntap/example/windows
 go 1.25.5
 
 require (
-	github.com/asciimoth/gonnect v0.3.2
-	github.com/asciimoth/gonnect-netstack v0.3.2
-	github.com/asciimoth/tuntap v0.0.0
+	github.com/asciimoth/gonnect v0.4.0
+	github.com/asciimoth/gonnect-netstack v0.3.3
+	github.com/asciimoth/tuntap v0.1.1
 )
 
 require (
