@@ -163,7 +163,7 @@ func main() {
 	const offset = 16 // room for virtio net header + safety margin
 
 	go func() {
-		if err := tun.CopyOffset(nativeTun, vtunServer, offset); err != nil {
+		if err := tun.Copy(nativeTun, vtunServer); err != nil {
 			log.Printf("Copy error: %v", err)
 		}
 	}()
