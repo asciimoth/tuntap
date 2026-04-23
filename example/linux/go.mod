@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/asciimoth/gonnect v0.6.0
-	github.com/asciimoth/gonnect-netstack v0.3.6
+	github.com/asciimoth/gonnect-netstack v0.3.7
 	github.com/asciimoth/tuntap v0.1.3
 )
 
