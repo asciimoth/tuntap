@@ -26,7 +26,7 @@ const (
 	rightTunName = "tunload1"
 	leftIP       = "10.232.0.1"
 	rightIP      = "10.232.0.2"
-	prefix       = 24
+	prefix       = 32
 	listenPort   = 18080
 	tunMTU       = 1500
 )
@@ -122,7 +122,7 @@ func main() {
 
 func startHTTPServer() (*http.Server, <-chan error, error) {
 	addr := fmt.Sprintf("%s:%d", rightIP, listenPort)
-	ln, err := net.Listen("tcp4", addr)
+	ln, err := listenTCP4Retry(addr, 10*time.Second)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen %s: %w", addr, err)
 	}
@@ -237,6 +237,20 @@ func runClient() error {
 	mbps := (float64(totalBytes) / (1 << 20)) / elapsed.Seconds()
 	log.Printf("client complete: requests=%d bytes=%d elapsed=%s throughput=%.2f MiB/s", totalRequests, totalBytes, elapsed.Round(time.Millisecond), mbps)
 	return nil
+}
+
+func listenTCP4Retry(addr string, timeout time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		ln, err := net.Listen("tcp4", addr)
+		if err == nil {
+			return ln, nil
+		}
+		lastErr = err
+		time.Sleep(200 * time.Millisecond)
+	}
+	return nil, lastErr
 }
 
 func getWithRetry(client *http.Client, url string, timeout time.Duration) (*http.Response, error) {
