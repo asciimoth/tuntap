@@ -164,6 +164,9 @@ func (tun *NativeTun) BatchSize() int {
 // Note: Read() and Write() assume the caller comes only from a single thread; there's no locking.
 
 func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	if err := validateReadBuffers(tun.BatchSize(), bufs, sizes); err != nil {
+		return 0, err
+	}
 	tun.running.Add(1)
 	defer tun.running.Done()
 retry:

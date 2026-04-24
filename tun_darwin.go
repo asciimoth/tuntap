@@ -218,6 +218,9 @@ func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) 
 	// TODO: the BSDs look very similar in Read() and Write(). They should be
 	// collapsed, with platform-specific files containing the varying parts of
 	// their implementations.
+	if err := validateReadBuffers(tun.BatchSize(), bufs, sizes); err != nil {
+		return 0, err
+	}
 	select {
 	case err := <-tun.errors:
 		return 0, err

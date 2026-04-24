@@ -456,6 +456,9 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 }
 
 func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	if err := validateReadBuffers(tun.BatchSize(), bufs, sizes); err != nil {
+		return 0, err
+	}
 	tun.readOpMu.Lock()
 	defer tun.readOpMu.Unlock()
 	select {

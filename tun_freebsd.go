@@ -349,6 +349,9 @@ func (tun *NativeTun) Events() <-chan gtun.Event {
 }
 
 func (tun *NativeTun) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	if err := validateReadBuffers(tun.BatchSize(), bufs, sizes); err != nil {
+		return 0, err
+	}
 	select {
 	case err := <-tun.errors:
 		return 0, err
