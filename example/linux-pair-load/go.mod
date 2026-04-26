@@ -3,7 +3,7 @@ module github.com/asciimoth/tuntap/example/linux-pair-load
 go 1.25.5
 
 require (
-	github.com/asciimoth/gonnect v0.7.1
+	github.com/asciimoth/gonnect v0.8.0
 	github.com/asciimoth/tuntap v0.1.3
 )
 
