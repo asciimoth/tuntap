@@ -11,6 +11,7 @@ package tuntap
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -346,10 +347,6 @@ func (tun *NativeTun) Write(bufs [][]byte, offset int) (int, error) {
 		tun.udpGROTable.reset()
 		tun.writeOpMu.Unlock()
 	}()
-	var (
-		errs  error
-		total int
-	)
 	tun.toWrite = tun.toWrite[:0]
 	if tun.vnetHdr {
 		err := handleGRO(bufs, offset, tun.tcpGROTable, tun.udpGROTable, tun.udpGSO, &tun.toWrite)
@@ -362,18 +359,26 @@ func (tun *NativeTun) Write(bufs [][]byte, offset int) (int, error) {
 			tun.toWrite = append(tun.toWrite, i)
 		}
 	}
-	for _, bufsI := range tun.toWrite {
-		n, err := tun.tunFile.Write(bufs[bufsI][offset:])
+	return writeBatch(tun.tunFile, bufs, tun.toWrite, offset)
+}
+
+func writeBatch(writer io.Writer, bufs [][]byte, toWrite []int, offset int) (int, error) {
+	var (
+		errs    error
+		written int
+	)
+	for _, bufsI := range toWrite {
+		_, err := writer.Write(bufs[bufsI][offset:])
 		if errors.Is(err, syscall.EBADFD) {
-			return total, os.ErrClosed
+			return written, os.ErrClosed
 		}
 		if err != nil {
 			errs = errors.Join(errs, err)
-		} else {
-			total += n
+			continue
 		}
+		written++
 	}
-	return total, errs
+	return written, errs
 }
 
 // handleVirtioRead splits in into bufs, leaving offset bytes at the front of
