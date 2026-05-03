@@ -3,8 +3,8 @@ module github.com/asciimoth/tuntap/example/windows
 go 1.25.5
 
 require (
-	github.com/asciimoth/gonnect v0.11.0
-	github.com/asciimoth/gonnect-netstack v0.3.14
+	github.com/asciimoth/gonnect v0.12.0
+	github.com/asciimoth/gonnect-netstack v0.3.15
 	github.com/asciimoth/tuntap v0.1.3
 )
 
