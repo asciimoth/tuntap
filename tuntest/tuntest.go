@@ -108,6 +108,8 @@ type chTun struct {
 	c *ChannelTUN
 }
 
+func (t *chTun) IsNative() bool { return false }
+
 func (t *chTun) MWO() int { return 0 }
 func (t *chTun) MRO() int { return 0 }
 
