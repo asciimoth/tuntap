@@ -3,8 +3,8 @@ module github.com/asciimoth/tuntap/example/linux
 go 1.25.5
 
 require (
-	github.com/asciimoth/gonnect v0.15.0
-	github.com/asciimoth/gonnect-netstack v0.4.17
+	github.com/asciimoth/gonnect v0.16.0
+	github.com/asciimoth/gonnect-netstack v0.4.18
 	github.com/asciimoth/tuntap v0.1.3
 )
 
