@@ -106,7 +106,7 @@ func runMain() {
 
 	copyErrCh := make(chan error, 1)
 	go func() {
-		copyErrCh <- tun.Copy(leftTun, rightTun)
+		copyErrCh <- tun.Copy(leftTun, rightTun, nil)
 	}()
 
 	exe, err := os.Executable()
