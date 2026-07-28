@@ -57,11 +57,13 @@
         buildInputs = with pkgs; [
           go
           gopls
+          golangci-lint
 
           coverage-reporter
 
           typos
           commitizen
+          just
         ];
       };
     });
