@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"unsafe"
 
@@ -898,16 +899,19 @@ func handleGRO(bufs [][]byte, offset int, tcpTable *tcpGROTable, udpTable *udpGR
 // element into sizes. It returns the number of buffers populated, and/or an
 // error.
 func gsoSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOffset int, isV6 bool) (int, error) {
+	segmentCount, err := validateGSOSplit(in, hdr, outBuffs, sizes, outOffset, isV6)
+	if err != nil {
+		return 0, err
+	}
+
 	iphLen := int(hdr.csumStart)
 	srcAddrOffset := ipv6SrcAddrOffset
 	addrLen := 16
 	if !isV6 {
-		in[10], in[11] = 0, 0 // clear ipv4 header checksum
 		srcAddrOffset = ipv4SrcAddrOffset
 		addrLen = 4
 	}
-	transportCsumAt := int(hdr.csumStart + hdr.csumOffset)
-	in[transportCsumAt], in[transportCsumAt+1] = 0, 0 // clear tcp/udp checksum
+	transportCsumAt := int(hdr.csumStart) + int(hdr.csumOffset)
 	var firstTCPSeqNum uint32
 	var protocol uint8
 	if hdr.gsoType == unix.VIRTIO_NET_HDR_GSO_TCPV4 || hdr.gsoType == unix.VIRTIO_NET_HDR_GSO_TCPV6 {
@@ -917,19 +921,11 @@ func gsoSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOf
 		protocol = unix.IPPROTO_UDP
 	}
 	nextSegmentDataAt := int(hdr.hdrLen)
-	i := 0
-	for ; nextSegmentDataAt < len(in); i++ {
-		if i == len(outBuffs) {
-			return i - 1, ErrTooManySegments
-		}
-		nextSegmentEnd := nextSegmentDataAt + int(hdr.gsoSize)
-		if nextSegmentEnd > len(in) {
-			nextSegmentEnd = len(in)
-		}
-		segmentDataLen := nextSegmentEnd - nextSegmentDataAt
+	for i := 0; i < segmentCount; i++ {
+		segmentDataLen := min(int(hdr.gsoSize), len(in)-nextSegmentDataAt)
+		nextSegmentEnd := nextSegmentDataAt + segmentDataLen
 		totalLen := int(hdr.hdrLen) + segmentDataLen
-		sizes[i] = totalLen
-		out := outBuffs[i][outOffset:]
+		out := outBuffs[i][outOffset : outOffset+totalLen]
 
 		copy(out, in[:iphLen])
 		if !isV6 {
@@ -942,6 +938,7 @@ func gsoSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOf
 				binary.BigEndian.PutUint16(out[4:], id)
 			}
 			binary.BigEndian.PutUint16(out[2:], uint16(totalLen))
+			out[10], out[11] = 0, 0
 			ipv4CSum := ^checksum(out[:iphLen], 0)
 			binary.BigEndian.PutUint16(out[10:], ipv4CSum)
 		} else {
@@ -951,10 +948,11 @@ func gsoSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOf
 
 		// copy transport header
 		copy(out[hdr.csumStart:hdr.hdrLen], in[hdr.csumStart:hdr.hdrLen])
+		out[transportCsumAt], out[transportCsumAt+1] = 0, 0
 
 		if protocol == unix.IPPROTO_TCP {
 			// set TCP seq and adjust TCP flags
-			tcpSeq := firstTCPSeqNum + uint32(hdr.gsoSize*uint16(i))
+			tcpSeq := firstTCPSeqNum + uint32(nextSegmentDataAt-int(hdr.hdrLen))
 			binary.BigEndian.PutUint32(out[hdr.csumStart+4:], tcpSeq)
 			if nextSegmentEnd != len(in) {
 				// FIN and PSH should only be set on last segment
@@ -975,18 +973,161 @@ func gsoSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOf
 		transportCSumNoFold := pseudoHeaderChecksumNoFold(protocol, in[srcAddrOffset:srcAddrOffset+addrLen], in[srcAddrOffset+addrLen:srcAddrOffset+addrLen*2], lenForPseudo)
 		transportCSum := ^checksum(out[hdr.csumStart:totalLen], transportCSumNoFold)
 		binary.BigEndian.PutUint16(out[hdr.csumStart+hdr.csumOffset:], transportCSum)
+		sizes[i] = totalLen
 
-		nextSegmentDataAt += int(hdr.gsoSize)
+		nextSegmentDataAt = nextSegmentEnd
 	}
-	return i, nil
+	return segmentCount, nil
+}
+
+func validateGSOSplit(in []byte, hdr virtioNetHdr, outBuffs [][]byte, sizes []int, outOffset int, isV6 bool) (int, error) {
+	if err := validateVirtioReadOutputs(outBuffs, sizes); err != nil {
+		return 0, err
+	}
+	if hdr.gsoSize == 0 {
+		return 0, errors.New("virtioNetHdr.gsoSize is zero")
+	}
+	if len(in) == 0 {
+		return 0, errors.New("GSO packet is empty")
+	}
+
+	ipVersion := in[0] >> 4
+	if (isV6 && ipVersion != 6) || (!isV6 && ipVersion != 4) {
+		return 0, fmt.Errorf("IP version %d does not match IPv6 setting %t", ipVersion, isV6)
+	}
+	switch hdr.gsoType {
+	case unix.VIRTIO_NET_HDR_GSO_TCPV4:
+		if isV6 {
+			return 0, errors.New("TCPv4 GSO packet has an IPv6 header")
+		}
+	case unix.VIRTIO_NET_HDR_GSO_TCPV6:
+		if !isV6 {
+			return 0, errors.New("TCPv6 GSO packet has an IPv4 header")
+		}
+	case unix.VIRTIO_NET_HDR_GSO_UDP_L4:
+	default:
+		return 0, fmt.Errorf("unsupported virtio GSO type: %d", hdr.gsoType)
+	}
+
+	iphLen := int(hdr.csumStart)
+	minimumIPHLen := 20
+	if isV6 {
+		minimumIPHLen = 40
+	}
+	if iphLen < minimumIPHLen {
+		return 0, fmt.Errorf("virtioNetHdr.csumStart (%d) is less than the minimum IP header length (%d)", iphLen, minimumIPHLen)
+	}
+	if !isV6 {
+		ipv4HeaderLen := int(in[0]&0x0f) * 4
+		if ipv4HeaderLen < minimumIPHLen || ipv4HeaderLen > 60 || ipv4HeaderLen != iphLen {
+			return 0, fmt.Errorf("IPv4 header length %d does not match virtioNetHdr.csumStart %d", ipv4HeaderLen, iphLen)
+		}
+	}
+	headerLen := int(hdr.hdrLen)
+	if headerLen < iphLen {
+		return 0, fmt.Errorf("virtioNetHdr.hdrLen (%d) < virtioNetHdr.csumStart (%d)", headerLen, iphLen)
+	}
+	if headerLen > len(in) {
+		return 0, fmt.Errorf("length of packet (%d) < virtioNetHdr.hdrLen (%d)", len(in), headerLen)
+	}
+	if headerLen == len(in) {
+		return 0, errors.New("GSO packet has no payload")
+	}
+	if err := validateChecksumPosition(headerLen, hdr.csumStart, hdr.csumOffset); err != nil {
+		return 0, err
+	}
+
+	transportHeaderLen := headerLen - iphLen
+	if hdr.gsoType == unix.VIRTIO_NET_HDR_GSO_UDP_L4 {
+		if transportHeaderLen != udphLen {
+			return 0, fmt.Errorf("UDP header length is invalid: %d", transportHeaderLen)
+		}
+		if hdr.csumOffset != 6 {
+			return 0, fmt.Errorf("UDP checksum offset is invalid: %d", hdr.csumOffset)
+		}
+	} else {
+		if transportHeaderLen < 20 || transportHeaderLen > 60 || transportHeaderLen%4 != 0 {
+			return 0, fmt.Errorf("TCP header length is invalid: %d", transportHeaderLen)
+		}
+		tcpHeaderLen := int(in[iphLen+12]>>4) * 4
+		if tcpHeaderLen != transportHeaderLen {
+			return 0, fmt.Errorf("TCP header length %d does not match virtioNetHdr header length %d", tcpHeaderLen, transportHeaderLen)
+		}
+		if hdr.csumOffset != 16 {
+			return 0, fmt.Errorf("TCP checksum offset is invalid: %d", hdr.csumOffset)
+		}
+	}
+
+	payloadLen := len(in) - headerLen
+	gsoSize := int(hdr.gsoSize)
+	segmentCount := payloadLen / gsoSize
+	if payloadLen%gsoSize != 0 {
+		segmentCount++
+	}
+	if segmentCount > len(outBuffs) {
+		return 0, fmt.Errorf("%w: need %d output buffers, have %d", ErrTooManySegments, segmentCount, len(outBuffs))
+	}
+	if segmentCount > len(sizes) {
+		return 0, fmt.Errorf("sizes: %w: need %d elements, have %d", io.ErrShortBuffer, segmentCount, len(sizes))
+	}
+
+	remaining := payloadLen
+	for i := 0; i < segmentCount; i++ {
+		if err := validateOutputOffset(outBuffs[i], outOffset, i); err != nil {
+			return 0, err
+		}
+		segmentDataLen := min(gsoSize, remaining)
+		totalLen := headerLen + segmentDataLen
+		if (!isV6 && totalLen > maxUint16) || (isV6 && totalLen-minimumIPHLen > maxUint16) {
+			return 0, fmt.Errorf("GSO segment %d length %d exceeds the IP length limit", i, totalLen)
+		}
+		if totalLen-iphLen > maxUint16 {
+			return 0, fmt.Errorf("GSO segment %d transport length %d exceeds the checksum length limit", i, totalLen-iphLen)
+		}
+		available := len(outBuffs[i]) - outOffset
+		if totalLen > available {
+			return 0, shortBufferError(i, totalLen, available)
+		}
+		remaining -= segmentDataLen
+	}
+	return segmentCount, nil
+}
+
+func validateVirtioReadOutputs(outBuffs [][]byte, sizes []int) error {
+	if len(outBuffs) == 0 {
+		return fmt.Errorf("%w: need at least 1 output buffer, have 0", ErrTooManySegments)
+	}
+	if len(sizes) < len(outBuffs) {
+		return fmt.Errorf("sizes: %w: need %d elements, have %d", io.ErrShortBuffer, len(outBuffs), len(sizes))
+	}
+	return nil
+}
+
+func validateOutputOffset(out []byte, offset, buffer int) error {
+	if offset < 0 || offset > len(out) {
+		return fmt.Errorf("output buffer %d: invalid offset %d for length %d", buffer, offset, len(out))
+	}
+	return nil
+}
+
+func validateChecksumPosition(packetLen int, csumStart, csumOffset uint16) error {
+	start := int(csumStart)
+	at := start + int(csumOffset)
+	if start > packetLen || at > packetLen-2 {
+		return fmt.Errorf("checksum at [%d:%d] exceeds packet length %d", at, at+2, packetLen)
+	}
+	return nil
 }
 
 func gsoNoneChecksum(in []byte, cSumStart, cSumOffset uint16) error {
-	cSumAt := cSumStart + cSumOffset
+	if err := validateChecksumPosition(len(in), cSumStart, cSumOffset); err != nil {
+		return err
+	}
+	cSumAt := int(cSumStart) + int(cSumOffset)
 	// The initial value at the checksum offset should be summed with the
 	// checksum we compute. This is typically the pseudo-header checksum.
 	initial := binary.BigEndian.Uint16(in[cSumAt:])
 	in[cSumAt], in[cSumAt+1] = 0, 0
-	binary.BigEndian.PutUint16(in[cSumAt:], ^checksum(in[cSumStart:], uint64(initial)))
+	binary.BigEndian.PutUint16(in[cSumAt:], ^checksum(in[int(cSumStart):], uint64(initial)))
 	return nil
 }

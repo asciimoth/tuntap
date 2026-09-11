@@ -42,6 +42,13 @@ func TestValidateReadBuffers(t *testing.T) {
 			sizes:     make([]int, 1),
 			wantErr:   io.ErrShortBuffer,
 		},
+		{
+			name:      "rejects sizes shorter than larger bufs slice",
+			batchSize: 2,
+			bufs:      make([][]byte, 3),
+			sizes:     make([]int, 2),
+			wantErr:   io.ErrShortBuffer,
+		},
 	}
 
 	for _, tt := range tests {

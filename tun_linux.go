@@ -34,7 +34,10 @@ const (
 // On Linux, NativeTun supports batched I/O and TCP/UDP generic receive
 // offload (GRO) / generic segmentation offload (GSO) when the kernel
 // provides IFF_VNET_HDR. These features are detected automatically during
-// construction.
+// construction. Read returns an error that matches io.ErrShortBuffer when a
+// packet does not fit in the visible part of an output buffer. If a GSO frame
+// cannot be split into the supplied buffers, Read returns no packets and does
+// not change the output buffers or sizes. The frame is still consumed.
 type NativeTun struct {
 	tunFile                 *os.File
 	index                   int32           // if index
@@ -392,26 +395,41 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 	}
 	in = in[virtioNetHdrLen:]
 	if hdr.gsoType == unix.VIRTIO_NET_HDR_GSO_NONE {
+		if err := validateVirtioReadOutputs(bufs, sizes); err != nil {
+			return 0, err
+		}
+		if err := validateOutputOffset(bufs[0], offset, 0); err != nil {
+			return 0, err
+		}
+		available := len(bufs[0]) - offset
+		if len(in) > available {
+			return 0, shortBufferError(0, len(in), available)
+		}
 		if hdr.flags&unix.VIRTIO_NET_HDR_F_NEEDS_CSUM != 0 {
 			// This means CHECKSUM_PARTIAL in skb context. We are responsible
 			// for computing the checksum starting at hdr.csumStart and placing
 			// at hdr.csumOffset.
-			err = gsoNoneChecksum(in, hdr.csumStart, hdr.csumOffset)
-			if err != nil {
+			if err := validateChecksumPosition(len(in), hdr.csumStart, hdr.csumOffset); err != nil {
 				return 0, err
 			}
 		}
-		if len(in) > len(bufs[0][offset:]) {
-			return 0, fmt.Errorf("read len %d overflows bufs element len %d", len(in), len(bufs[0][offset:]))
+		out := bufs[0][offset : offset+len(in)]
+		copy(out, in)
+		if hdr.flags&unix.VIRTIO_NET_HDR_F_NEEDS_CSUM != 0 {
+			if err := gsoNoneChecksum(out, hdr.csumStart, hdr.csumOffset); err != nil {
+				return 0, err
+			}
 		}
-		n := copy(bufs[0][offset:], in)
-		sizes[0] = n
+		sizes[0] = len(in)
 		return 1, nil
 	}
 	if hdr.gsoType != unix.VIRTIO_NET_HDR_GSO_TCPV4 && hdr.gsoType != unix.VIRTIO_NET_HDR_GSO_TCPV6 && hdr.gsoType != unix.VIRTIO_NET_HDR_GSO_UDP_L4 {
 		return 0, fmt.Errorf("unsupported virtio GSO type: %d", hdr.gsoType)
 	}
 
+	if len(in) == 0 {
+		return 0, errors.New("GSO packet is empty")
+	}
 	ipVersion := in[0] >> 4
 	switch ipVersion {
 	case 4:
@@ -431,16 +449,23 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 	// FORWARD path. Instead, parse the transport header length and add it onto
 	// csumStart, which is synonymous for IP header length.
 	if hdr.gsoType == unix.VIRTIO_NET_HDR_GSO_UDP_L4 {
-		hdr.hdrLen = hdr.csumStart + 8
+		if int(hdr.csumStart) > maxUint16-udphLen {
+			return 0, fmt.Errorf("virtioNetHdr.csumStart (%d) is too large", hdr.csumStart)
+		}
+		hdr.hdrLen = hdr.csumStart + udphLen
 	} else {
-		if len(in) <= int(hdr.csumStart+12) {
+		tcpDataOffsetAt := int(hdr.csumStart) + 12
+		if tcpDataOffsetAt >= len(in) {
 			return 0, errors.New("packet is too short")
 		}
 
-		tcpHLen := uint16(in[hdr.csumStart+12] >> 4 * 4)
+		tcpHLen := uint16(in[tcpDataOffsetAt]>>4) * 4
 		if tcpHLen < 20 || tcpHLen > 60 {
 			// A TCP header must be between 20 and 60 bytes in length.
 			return 0, fmt.Errorf("tcp header len is invalid: %d", tcpHLen)
+		}
+		if int(hdr.csumStart) > maxUint16-int(tcpHLen) {
+			return 0, fmt.Errorf("virtioNetHdr.csumStart (%d) is too large", hdr.csumStart)
 		}
 		hdr.hdrLen = hdr.csumStart + tcpHLen
 	}
@@ -452,9 +477,8 @@ func handleVirtioRead(in []byte, bufs [][]byte, sizes []int, offset int) (int, e
 	if hdr.hdrLen < hdr.csumStart {
 		return 0, fmt.Errorf("virtioNetHdr.hdrLen (%d) < virtioNetHdr.csumStart (%d)", hdr.hdrLen, hdr.csumStart)
 	}
-	cSumAt := int(hdr.csumStart + hdr.csumOffset)
-	if cSumAt+1 >= len(in) {
-		return 0, fmt.Errorf("end of checksum offset (%d) exceeds packet length (%d)", cSumAt+1, len(in))
+	if err := validateChecksumPosition(int(hdr.hdrLen), hdr.csumStart, hdr.csumOffset); err != nil {
+		return 0, err
 	}
 
 	return gsoSplit(in, hdr, bufs, sizes, offset, ipVersion == 6)
