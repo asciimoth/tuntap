@@ -108,6 +108,11 @@ func (rw *RWCancel) Write(p []byte) (n int, err error) {
 
 func (rw *RWCancel) Cancel() (err error) {
 	_, err = rw.closingWriter.Write([]byte{0})
+	// Cleanup can close the reader or writer before this write. In both cases,
+	// the operation that Cancel must wake has already stopped.
+	if errors.Is(err, syscall.EPIPE) || errors.Is(err, os.ErrClosed) {
+		return nil
+	}
 	return
 }
 

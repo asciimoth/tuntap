@@ -534,10 +534,7 @@ func (tun *NativeTun) Close() error {
 		}
 		err2 = tun.tunFile.Close()
 	})
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	return errors.Join(err1, err2)
 }
 
 // BatchSize returns the maximum number of packets that can be processed
