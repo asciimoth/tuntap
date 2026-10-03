@@ -167,48 +167,45 @@ func (tun *NativeTun) routineNetlinkListener() {
 		}
 
 		wasEverUp := false
-		for remain := msg[:msgn]; len(remain) >= unix.SizeofNlMsghdr; {
-
-			hdr := *(*unix.NlMsghdr)(unsafe.Pointer(&remain[0]))
-
-			if int(hdr.Len) > len(remain) {
-				break
-			}
-
-			switch hdr.Type {
-			case unix.NLMSG_DONE:
-				remain = []byte{}
-
-			case unix.RTM_NEWLINK:
-				info := *(*unix.IfInfomsg)(unsafe.Pointer(&remain[unix.SizeofNlMsghdr]))
-				remain = remain[hdr.Len:]
-
-				if info.Index != tun.index {
-					// not our interface
-					continue
-				}
-
-				if info.Flags&unix.IFF_RUNNING != 0 {
-					tun.events <- gtun.EventUp
-					wasEverUp = true
-				}
-
-				if info.Flags&unix.IFF_RUNNING == 0 {
-					// Don't emit EventDown before we've ever emitted EventUp.
-					// This avoids a startup race with HackListener, which
-					// might detect Up before we have finished reporting Down.
-					if wasEverUp {
-						tun.events <- gtun.EventDown
-					}
-				}
-
-				tun.events <- gtun.EventMTUUpdate
-
-			default:
-				remain = remain[hdr.Len:]
-			}
+		for _, event := range parseNetlinkEvents(msg[:msgn], tun.index, &wasEverUp) {
+			tun.events <- event
 		}
 	}
+}
+
+// parseNetlinkEvents converts a raw netlink datagram to TUN status events.
+// The kernel normally supplies msg, but treat it as untrusted because a short
+// or malformed message must not cause an out-of-bounds read.
+func parseNetlinkEvents(msg []byte, index int32, wasEverUp *bool) []gtun.Event {
+	messages, err := syscall.ParseNetlinkMessage(msg)
+	if err != nil {
+		return nil
+	}
+
+	var events []gtun.Event
+	for _, message := range messages {
+		if message.Header.Type == unix.NLMSG_DONE {
+			break
+		}
+		if message.Header.Type != unix.RTM_NEWLINK || len(message.Data) < unix.SizeofIfInfomsg {
+			continue
+		}
+
+		info := *(*unix.IfInfomsg)(unsafe.Pointer(&message.Data[0]))
+		if info.Index != index {
+			continue
+		}
+		if info.Flags&unix.IFF_RUNNING != 0 {
+			events = append(events, gtun.EventUp)
+			*wasEverUp = true
+		} else if *wasEverUp {
+			// Do not emit EventDown before EventUp. This avoids a startup
+			// race with routineHackListener.
+			events = append(events, gtun.EventDown)
+		}
+		events = append(events, gtun.EventMTUUpdate)
+	}
+	return events
 }
 
 func getIFIndex(name string) (int32, error) {

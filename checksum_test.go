@@ -69,6 +69,16 @@ func TestPseudoHeaderChecksum(t *testing.T) {
 	}
 }
 
+func FuzzChecksum(f *testing.F) {
+	f.Add([]byte(nil), uint16(0))
+	f.Add([]byte{0, 1, 2, 3, 4}, uint16(0x1234))
+	f.Fuzz(func(t *testing.T, data []byte, initial uint16) {
+		if got, want := checksum(data, uint64(initial)), checksumRef(data, initial); got != want {
+			t.Fatalf("checksum = %#x, want %#x", got, want)
+		}
+	})
+}
+
 func BenchmarkChecksum(b *testing.B) {
 	lengths := []int{
 		64,

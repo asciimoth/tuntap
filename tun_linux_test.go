@@ -1,6 +1,7 @@
 package tuntap
 
 import (
+	"encoding/binary"
 	"errors"
 	"os"
 	"sync"
@@ -12,6 +13,51 @@ import (
 	"github.com/asciimoth/tuntap/rwcancel"
 	"golang.org/x/sys/unix"
 )
+
+func netlinkLinkMessage(index int32, flags uint32) []byte {
+	msg := make([]byte, unix.SizeofNlMsghdr+unix.SizeofIfInfomsg)
+	binary.NativeEndian.PutUint32(msg[0:4], uint32(len(msg)))
+	binary.NativeEndian.PutUint16(msg[4:6], unix.RTM_NEWLINK)
+	binary.NativeEndian.PutUint32(msg[unix.SizeofNlMsghdr+4:], uint32(index))
+	binary.NativeEndian.PutUint32(msg[unix.SizeofNlMsghdr+8:], flags)
+	return msg
+}
+
+func TestParseNetlinkEvents(t *testing.T) {
+	t.Parallel()
+
+	wasEverUp := false
+	events := parseNetlinkEvents(netlinkLinkMessage(7, unix.IFF_RUNNING), 7, &wasEverUp)
+	if len(events) != 2 || events[0] != gtun.EventUp || events[1] != gtun.EventMTUUpdate {
+		t.Fatalf("up events = %v, want EventUp and EventMTUUpdate", events)
+	}
+
+	events = parseNetlinkEvents(netlinkLinkMessage(7, 0), 7, &wasEverUp)
+	if len(events) != 2 || events[0] != gtun.EventDown || events[1] != gtun.EventMTUUpdate {
+		t.Fatalf("down events = %v, want EventDown and EventMTUUpdate", events)
+	}
+
+	if events := parseNetlinkEvents(netlinkLinkMessage(8, unix.IFF_RUNNING), 7, &wasEverUp); len(events) != 0 {
+		t.Fatalf("events for another interface = %v, want none", events)
+	}
+}
+
+func FuzzParseNetlinkEvents(f *testing.F) {
+	f.Add(netlinkLinkMessage(7, unix.IFF_RUNNING), int32(7), false)
+	f.Add([]byte{1, 0, 0, 0}, int32(0), false)
+	f.Fuzz(func(t *testing.T, msg []byte, index int32, wasEverUp bool) {
+		initialState := wasEverUp
+		events := parseNetlinkEvents(msg, index, &wasEverUp)
+		if initialState && !wasEverUp {
+			t.Fatal("parser cleared the prior up state")
+		}
+		for _, event := range events {
+			if event != gtun.EventUp && event != gtun.EventDown && event != gtun.EventMTUUpdate {
+				t.Fatalf("parser returned invalid event %v", event)
+			}
+		}
+	})
+}
 
 type stubBatchWriter struct {
 	writes []stubBatchWrite
